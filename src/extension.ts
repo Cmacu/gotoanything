@@ -1,8 +1,9 @@
 // The module 'vscode' contains the VS Code extensibility API
 // Import the module and reference it with the alias vscode in your code below
 import * as vscode from "vscode";
-import { throws } from "assert";
 
+// TODO: select only the symbol name
+// TODO: case insensitive file filtering
 export const MAX_FILE_RESULTS = 10;
 export const EXCLUDE_PATTERN = "";
 export const HELP_PREFIX = "?";
@@ -134,7 +135,7 @@ export class GoToAnytingHandler {
   find(query: string): void {
     this.quickPick.busy = true;
     this.findAnythingHandler.find(query).then(items => {
-      console.log(items);
+      // console.log(items);
       this.quickPick.items = items ? items : [];
       this.quickPick.busy = false;
     });
@@ -285,7 +286,7 @@ export class FindAnythingHandler {
   }
 
   processSymbols(
-    symbols: (vscode.DocumentSymbol | vscode.SymbolInformation)[] | undefined,
+    symbols: vscode.DocumentSymbol[] | undefined,
     file: vscode.Uri,
     kind: SymbolSearchType,
     query: string
@@ -294,6 +295,7 @@ export class FindAnythingHandler {
     if (symbols == undefined) {
       return items;
     }
+    console.log(file);
     console.log(symbols);
     symbols.forEach(symbol => {
       if (kind.symbolKinds.includes(symbol.kind)) {
@@ -310,22 +312,18 @@ export class FindAnythingHandler {
           description: description
         });
       }
-      if (symbol instanceof vscode.DocumentSymbol) {
-        items = items.concat(this.processSymbols(symbol.children, file, kind, query));
-      }
+      items = items.concat(this.processSymbols(symbol.children, file, kind, query));
     });
     return items;
   }
 
-  findSymbols(currentUri: vscode.Uri): Thenable<(vscode.DocumentSymbol | vscode.SymbolInformation)[] | undefined> {
+  findSymbols(currentUri: vscode.Uri): Thenable<vscode.DocumentSymbol[] | undefined> {
     if (currentUri === undefined) {
       // if there is no currently open file return empty array
       return Promise.resolve(undefined);
     }
-    return vscode.commands.executeCommand<(vscode.DocumentSymbol | vscode.SymbolInformation)[]>(
-      "vscode.executeDocumentSymbolProvider",
-      currentUri
-    );
+    // return vscode.commands.executeCommand<(vscode.DocumentSymbol | vscode.SymbolInformation)[]>(
+    return vscode.commands.executeCommand<vscode.DocumentSymbol[]>("vscode.executeDocumentSymbolProvider", currentUri);
   }
 
   processFile(file: vscode.Uri, query: string, line: number): QuickPickAnything {
