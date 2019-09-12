@@ -1,13 +1,18 @@
+// The module 'vscode' contains the VS Code extensibility API
+// Import the module and reference it with the alias vscode in your code below
 import * as vscode from "vscode";
+import { throws } from "assert";
 
-export const HELP_PREFIX = "?";
-export const LINE_PREFIX = ":";
-export const DECLARATION_PREFIX = "$";
-export const DECLARATION_SYMBOL_KINDS = [4, 6, 7, 9, 10, 12, 13];
-export const FUNCTION_PREFIX = "@";
-export const FUNCTION_SYMBOL_KINDS = [5, 8, 11];
 export const MAX_FILE_RESULTS = 10;
 export const EXCLUDE_PATTERN = "";
+export const HELP_PREFIX = "?";
+export const LINE_PREFIX = ":";
+export const FUNCTION_PREFIX = "@";
+export const DECLARATION_PREFIX = "$";
+export const LITERAL_PREFIX = "!";
+export const FUNCTION_SYMBOL_KINDS = [5, 8, 11];
+export const DECLARATION_SYMBOL_KINDS = [4, 6, 7, 9, 10, 12, 13];
+export const LITERAL_SYMBOL_KINDS = [14, 15, 16, 20];
 
 export const quickPickIcons = {
   0: "$(code)", // "File",
@@ -47,12 +52,12 @@ export interface QuickPickAnything extends vscode.QuickPickItem {
 
 export interface SymbolSearchType {
   name: string;
-  symbolKinds: number[];
   prefix: string;
-  doSearch: boolean;
+  symbolKinds: number[];
+  label: string;
 }
 
-export interface FindAnythingHandlerSettings {
+export interface GoToAnythingSettings {
   workspaceFolder: string;
   maxFileResults: number;
   excludePattern: string;
@@ -60,16 +65,15 @@ export interface FindAnythingHandlerSettings {
 
 export class GoToAnytingHandler {
   private static instance: GoToAnytingHandler;
-  private workspaceFolder: string;
-  private config: vscode.WorkspaceConfiguration;
   private quickPick: vscode.QuickPick<QuickPickAnything>;
+  private preserveSearch: boolean;
   private currentUri: vscode.Uri | undefined;
   private closePreview: boolean = false;
+  private findAnythingHandler: FindAnythingHandler;
 
   private constructor() {
-    this.config = vscode.workspace.getConfiguration("GoToAnything");
-    const workspace = vscode.workspace.workspaceFolders![0];
-    this.workspaceFolder = workspace ? workspace.uri.path : "";
+    this.preserveSearch = vscode.workspace.getConfiguration("GoToAnything").get<boolean>("preserveSearch", true);
+    this.findAnythingHandler = FindAnythingHandler.getInstance();
     this.quickPick = this.create();
     this.register();
   }
@@ -92,7 +96,7 @@ export class GoToAnytingHandler {
 
   register(): void {
     this.quickPick.onDidChangeValue(value => {
-      this.find();
+      this.find(value);
     });
 
     this.quickPick.onDidChangeActive(value => {
@@ -114,32 +118,24 @@ export class GoToAnytingHandler {
   }
 
   show(): void {
-    const preserveSearch = this.config.get("preserveSearch");
-    if (!preserveSearch) {
+    if (!this.preserveSearch) {
       this.quickPick.value = "";
     }
     const editor = vscode.window.activeTextEditor;
-    if (editor) {
-      this.currentUri = editor.document.uri;
-    }
+    this.currentUri = editor ? editor.document.uri : undefined;
     this.quickPick.show();
-    this.find();
+    this.find(this.quickPick.value);
   }
 
   hide(): void {
     this.quickPick.hide();
   }
 
-  find(): void {
-    let value = this.quickPick.value;
-    if (value.indexOf(HELP_PREFIX) >= 0) {
-      this.quickPick.items = this.help();
-      return;
-    }
+  find(query: string): void {
     this.quickPick.busy = true;
-    const settings = this.getSettings();
-    new findAnythingHandler(value, settings).find().then(items => {
-      this.quickPick.items = items;
+    this.findAnythingHandler.find(query).then(items => {
+      console.log(items);
+      this.quickPick.items = items ? items : [];
       this.quickPick.busy = false;
     });
   }
@@ -169,35 +165,6 @@ export class GoToAnytingHandler {
     return new vscode.Range(new vscode.Position(line - 1, 0), new vscode.Position(line - 1, 200));
   }
 
-  getSettings(): FindAnythingHandlerSettings {
-    return {
-      workspaceFolder: this.workspaceFolder,
-      maxFileResults: this.config.get<number>("maxFileResults", MAX_FILE_RESULTS),
-      excludePattern: this.config.get<string>("excludePattern", EXCLUDE_PATTERN)
-    };
-  }
-
-  help(): QuickPickAnything[] {
-    let helpItems: QuickPickAnything[] = [];
-    helpItems.push({
-      shortcut: "",
-      label: HELP_PREFIX + " Start by typing anything in the input box to find files or filter by file path"
-    });
-    helpItems.push({
-      shortcut: FUNCTION_PREFIX,
-      label: HELP_PREFIX + " Type '" + FUNCTION_PREFIX + "' to find functions/methods within the filtered files"
-    });
-    helpItems.push({
-      shortcut: DECLARATION_PREFIX,
-      label: HELP_PREFIX + " Type '" + DECLARATION_PREFIX + "' to find classes/variables within the filtered files"
-    });
-    helpItems.push({
-      shortcut: LINE_PREFIX,
-      label: HELP_PREFIX + " Type '" + LINE_PREFIX + "' followed by the line number to open the file at this line"
-    });
-    return helpItems;
-  }
-
   openSelected(): boolean {
     const items = this.quickPick.selectedItems;
     if (!items || !items.length || !items[0]) {
@@ -205,7 +172,7 @@ export class GoToAnytingHandler {
     }
     if (items[0].shortcut) {
       this.quickPick.value = items[0].shortcut;
-      this.find();
+      this.find(this.quickPick.value);
       return false;
     }
     if (!items[0].uri) {
@@ -220,126 +187,131 @@ export class GoToAnytingHandler {
   }
 }
 
-export class findAnythingHandler {
+export class FindAnythingHandler {
+  private static instance: FindAnythingHandler;
   private search: string | undefined;
   private searchLine: number | string | undefined;
-  private workspaceFolder: string;
-  private maxFileResults: number;
-  private excludePattern: string;
-  private declarationSearch: SymbolSearchType = {
-    name: "Declarations",
-    prefix: DECLARATION_PREFIX,
-    symbolKinds: DECLARATION_SYMBOL_KINDS,
-    doSearch: false
-  };
-  private functionSearch: SymbolSearchType = {
-    name: "Functions",
-    prefix: FUNCTION_PREFIX,
-    symbolKinds: FUNCTION_SYMBOL_KINDS,
-    doSearch: false
-  };
+  private settings: GoToAnythingSettings;
+  private symbolSearchTypes: SymbolSearchType[];
 
-  constructor(search: string, settings: FindAnythingHandlerSettings) {
-    // console.log(vscode.SymbolKind);
-    this.search = search;
-    this.workspaceFolder = settings.workspaceFolder;
-    this.maxFileResults = settings.maxFileResults;
-    this.excludePattern = settings.excludePattern;
-    this.handleLinePrefix();
-    this.handleSymbolPrefix(this.declarationSearch);
-    this.handleSymbolPrefix(this.functionSearch);
-  }
-
-  handleLinePrefix(): void {
-    if (!this.search) {
-      return;
-    }
-    let linePrefixIndex = this.search.indexOf(LINE_PREFIX);
-    if (linePrefixIndex >= 0) {
-      const line = Number(this.search.substring(linePrefixIndex + 1));
-      this.searchLine = !isNaN(line) ? line : "";
-      this.search = this.search.substring(0, linePrefixIndex);
-    } else {
-      this.searchLine = undefined;
-    }
-  }
-
-  handleSymbolPrefix(kind: SymbolSearchType): void {
-    if (!this.search) {
-      return;
-    }
-    let symbolIndex = this.search.indexOf(kind.prefix);
-    if (symbolIndex >= 0) {
-      this.search = this.search.substring(0, symbolIndex);
-      kind.doSearch = true;
-    } else {
-      kind.doSearch = false;
-    }
-  }
-
-  async find(): Promise<QuickPickAnything[]> {
-    let files: vscode.Uri[] = [];
-    if (this.search && this.search.length) {
-      const pattern: string | vscode.RelativePattern = "**/" + this.search + "*";
-      files = await vscode.workspace.findFiles(pattern, this.excludePattern, this.maxFileResults);
-    } else {
-      const editor = vscode.window.activeTextEditor;
-      if (editor) {
-        files.push(editor.document.uri);
+  private constructor() {
+    this.settings = this.getSettings();
+    this.symbolSearchTypes = [
+      {
+        name: "Functions",
+        prefix: FUNCTION_PREFIX,
+        symbolKinds: FUNCTION_SYMBOL_KINDS,
+        label: HELP_PREFIX + " Type '" + FUNCTION_PREFIX + "' to search for functions/methods within the filtered files"
+      },
+      {
+        name: "Declarations",
+        prefix: DECLARATION_PREFIX,
+        symbolKinds: DECLARATION_SYMBOL_KINDS,
+        label:
+          HELP_PREFIX +
+          " Type '" +
+          DECLARATION_PREFIX +
+          "' to search for declarations (classes, variables, interfaces, etc) within the filtered files"
+      },
+      {
+        name: "Literals",
+        prefix: LITERAL_PREFIX,
+        symbolKinds: LITERAL_SYMBOL_KINDS,
+        label:
+          HELP_PREFIX +
+          " Type '" +
+          LITERAL_PREFIX +
+          "' to search for literals (numbers, strings, booleans, etc) within the filtered files"
       }
+    ];
+  }
+
+  getSettings(): GoToAnythingSettings {
+    const config = vscode.workspace.getConfiguration("GoToAnything");
+    const workspace = vscode.workspace.workspaceFolders![0];
+    return {
+      workspaceFolder: workspace ? workspace.uri.path : "",
+      maxFileResults: config.get<number>("maxFileResults", MAX_FILE_RESULTS),
+      excludePattern: config.get<string>("excludePattern", EXCLUDE_PATTERN)
+    };
+  }
+
+  static getInstance(): FindAnythingHandler {
+    if (!FindAnythingHandler.instance) {
+      FindAnythingHandler.instance = new FindAnythingHandler();
     }
-    if (!files.length) {
-      // TODO create help menu / recent files
+    return FindAnythingHandler.instance;
+  }
+
+  find(query: string): Thenable<QuickPickAnything[] | undefined> {
+    // Empty
+    if (!query || !query.length) {
       return Promise.resolve([]);
     }
-    if (this.declarationSearch.doSearch) {
-      return this.findSymbolsInFiles(this.declarationSearch, files);
-    } else if (this.functionSearch.doSearch) {
-      return this.findSymbolsInFiles(this.functionSearch, files);
-    } else {
-      return files.map(file => this.processFile(file));
+    // Help
+    if (query.indexOf(HELP_PREFIX) >= 0) {
+      return Promise.resolve(this.help());
     }
-  }
-
-  async findSymbolsInFiles(kind: SymbolSearchType, files: vscode.Uri[]): Promise<QuickPickAnything[]> {
-    let items: QuickPickAnything[] = [];
-    for (let i = 0; i < files.length; i++) {
-      const file = files[i];
-      const symbols = await this.findSymbols(file);
-      if (!symbols) {
+    const editor = vscode.window.activeTextEditor;
+    // Symbols
+    for (let symbolSearchType of this.symbolSearchTypes) {
+      const symbolIndex = query.indexOf(symbolSearchType.prefix);
+      if (symbolIndex < 0) {
         continue;
       }
-      items = items.concat(this.processSymbols(symbols, file, kind));
+      query = query.substring(0, symbolIndex);
+      if (!editor) {
+        return Promise.resolve([]);
+      }
+      const file = editor.document.uri;
+      return this.findSymbols(file).then(symbols => this.processSymbols(symbols, file, symbolSearchType, query));
     }
-    return items;
+    // Line
+    let line: number = 0;
+    const linePrefixIndex = query.indexOf(LINE_PREFIX);
+    if (linePrefixIndex >= 0) {
+      line = Number(query.substring(linePrefixIndex + 1));
+      // line = isNaN(line) ? 0 : line;
+      query = query.substring(0, linePrefixIndex);
+    }
+    // Files
+    if (!query.length) {
+      return Promise.resolve(editor ? [this.processFile(editor.document.uri, query, line)] : []);
+    } else {
+      return vscode.workspace
+        .findFiles("**/*" + query + "*", this.settings.excludePattern, this.settings.maxFileResults)
+        .then(files => files.map(file => this.processFile(file, query, line)));
+    }
   }
 
   processSymbols(
     symbols: (vscode.DocumentSymbol | vscode.SymbolInformation)[] | undefined,
     file: vscode.Uri,
-    kind: SymbolSearchType
+    kind: SymbolSearchType,
+    query: string
   ): QuickPickAnything[] {
     let items: QuickPickAnything[] = [];
     if (symbols == undefined) {
       return items;
     }
-
+    console.log(symbols);
     symbols.forEach(symbol => {
       if (kind.symbolKinds.includes(symbol.kind)) {
         const icon = quickPickIcons[symbol.kind];
-        const detail = file.path.replace(this.workspaceFolder, "");
+        const detail = vscode.SymbolKind[symbol.kind] + " in " + file.path.replace(this.settings.workspaceFolder, "");
         const label = icon + " " + symbol.name;
         const range = symbol instanceof vscode.DocumentSymbol ? symbol.range : symbol.location.range;
+        const description = query + kind.prefix + symbol.name;
         items.push({
           uri: file,
           label: label,
           detail: detail,
           range: range,
-          description: vscode.SymbolKind[symbol.kind] + "  " + this.search + kind.prefix + symbol.name
+          description: description
         });
       }
       if (symbol instanceof vscode.DocumentSymbol) {
-        items = items.concat(this.processSymbols(symbol.children, file, kind));
+        items = items.concat(this.processSymbols(symbol.children, file, kind, query));
       }
     });
     return items;
@@ -356,19 +328,35 @@ export class findAnythingHandler {
     );
   }
 
-  processFile(file: vscode.Uri): QuickPickAnything {
+  processFile(file: vscode.Uri, query: string, line: number): QuickPickAnything {
     const anythingItem: QuickPickAnything = {
       uri: file,
       label: "$(code) " + file.path.split("/").pop(),
-      detail: file.path.replace(this.workspaceFolder, ""),
+      detail: file.path.replace(this.settings.workspaceFolder, ""),
       description: file.scheme
     };
-    if (this.searchLine !== undefined) {
-      anythingItem.description += " " + this.search + LINE_PREFIX + this.searchLine;
-      anythingItem.line = +this.searchLine;
+    if (line) {
+      anythingItem.description += " " + query + LINE_PREFIX + line;
+      anythingItem.line = +line;
     }
 
     return anythingItem;
+  }
+
+  help(): QuickPickAnything[] {
+    let helpItems: QuickPickAnything[] = this.symbolSearchTypes.map(symbolSearchType => ({
+      shortcut: symbolSearchType.prefix,
+      label: symbolSearchType.label
+    }));
+    helpItems.push({
+      shortcut: "",
+      label: HELP_PREFIX + " Start by typing anything in the input box to find files or filter by file path"
+    });
+    helpItems.push({
+      shortcut: LINE_PREFIX,
+      label: HELP_PREFIX + " Type '" + LINE_PREFIX + "' followed by the line number to open the file at this line"
+    });
+    return helpItems;
   }
 }
 

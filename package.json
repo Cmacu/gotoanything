@@ -1,5 +1,5 @@
 {
-  "name": "gotoanything",
+  "name": "Gotoanything",
   "displayName": "Go To Anything",
   "description": "Go To search box similar to Sublime 3 enabling searching for functions and declarations in filtered files via prefixes",
   "version": "0.0.1",
@@ -10,13 +10,13 @@
     "Other"
   ],
   "activationEvents": [
-    "onCommand:extension.goToAnything"
+    "onCommand:extension.GoToAnything"
   ],
   "main": "./out/extension.js",
   "contributes": {
     "commands": [
       {
-        "command": "extension.goToAnything",
+        "command": "extension.GoToAnything",
         "title": "Go To Anything"
       }
     ],
