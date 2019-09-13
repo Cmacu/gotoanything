@@ -24,7 +24,7 @@ export default class GoToAnyting {
     this.quickPick.show();
   }
 
-  public find(query: string): Thenable<void> {
+  public find(query: string): Thenable<boolean> {
     this.quickPick.busy = true;
     const file = this.activeItem ? this.activeItem.uri : undefined;
     return this.findAnything.find(query, file).then(items => {
@@ -32,6 +32,7 @@ export default class GoToAnyting {
       this.previewSelected(items).then(isSelected => {
         this.quickPick.busy = false;
       });
+      return items ? true : false;
     });
   }
 
