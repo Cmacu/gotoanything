@@ -1,5 +1,5 @@
 {
-  "name": "Gotoanything",
+  "name": "gotoanything",
   "displayName": "Go To Anything",
   "description": "Go To search box similar to Sublime 3 enabling searching for functions and declarations in filtered files via prefixes",
   "version": "0.0.1",
@@ -41,20 +41,10 @@
     "configuration": {
       "title": "GoToAnything",
       "properties": {
-        "GoToAnything.maxFileResults": {
+        "GoToAnything.previewDelay": {
           "type": "integer",
-          "default": 10,
-          "description": "Limits the number of files for the find files function"
-        },
-        "GoToAnything.excludePattern": {
-          "type": "string",
-          "default": "",
-          "description": "The exclude patterm for find files function (regex accepted)"
-        },
-        "GoToAnything.preserveSearch": {
-          "type": "boolean",
-          "default": true,
-          "description": "Setting to preserve the previous search term when re-opening the dialog"
+          "default": 250,
+          "description": "The delay in milisecconds for showing preview of the selected item in the dropdown (only if preview is enabled)"
         }
       }
     }

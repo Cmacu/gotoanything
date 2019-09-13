@@ -1,11 +1,8 @@
 // The module 'vscode' contains the VS Code extensibility API
 // Import the module and reference it with the alias vscode in your code below
 import * as vscode from "vscode";
-import { close } from "inspector";
 
-// TODO: close previews
 export const MAX_FILE_RESULTS = 10;
-export const EXCLUDE_PATTERN = "";
 export const HELP_PREFIX = "?";
 export const LINE_PREFIX = ":";
 export const FUNCTION_PREFIX = "@";
@@ -60,31 +57,21 @@ export interface SymbolSearchType {
   ignore?: string;
 }
 
-export interface GoToAnythingSettings {
-  workspaceFolder: string;
-  maxFileResults: number;
-  excludePattern: string;
-}
-
 export class GoToAnytingHandler {
-  private static instance: GoToAnytingHandler;
+  private enablePreview: boolean;
+  private previewDelay: number;
+  private originalUri: vscode.Uri | undefined;
+  private activeItem: QuickPickAnything | undefined;
   private findAnythingHandler: FindAnythingHandler;
   private quickPick: vscode.QuickPick<QuickPickAnything>;
-  private openDocuments: vscode.TextDocument[] = [];
-  private previewEditors: vscode.TextEditor[] = [];
-  private closeEditor: vscode.TextEditor | undefined;
 
-  private constructor() {
+  constructor() {
+    const config = vscode.workspace.getConfiguration();
+    this.enablePreview = config.get("workbench.editor.enablePreview", true);
+    this.previewDelay = config.get("GoToAnything.previewDelay", 250);
     this.findAnythingHandler = new FindAnythingHandler();
     this.quickPick = this.create();
     this.register();
-  }
-
-  static getInstance(): GoToAnytingHandler {
-    if (!GoToAnytingHandler.instance) {
-      GoToAnytingHandler.instance = new GoToAnytingHandler();
-    }
-    return GoToAnytingHandler.instance;
   }
 
   create(): vscode.QuickPick<QuickPickAnything> {
@@ -102,14 +89,20 @@ export class GoToAnytingHandler {
     });
 
     this.quickPick.onDidChangeActive(value => {
-      this.preview(value);
+      this.quickPick.busy = true;
+      if (value[0]) {
+        this.activeItem = value[0];
+      }
+      this.previewSelected(value).then(isSelected => {
+        this.quickPick.busy = false;
+      });
     });
 
     this.quickPick.onDidHide(e => {
-      if (this.closeEditor) {
-        this.closeEditor.show();
-        vscode.commands.executeCommand("workbench.action.closeActiveEditor");
+      if (this.originalUri) {
+        vscode.window.showTextDocument(this.originalUri);
       }
+      this.activeItem = undefined;
       this.quickPick.value = "";
     });
 
@@ -120,101 +113,66 @@ export class GoToAnytingHandler {
         }
       });
     });
-
-    vscode.workspace.onDidOpenTextDocument(document => {
-      setTimeout(
-        document => {
-          this.previewEditors.forEach(editor => {
-            if (editor && editor.document.uri.path === document.uri.path) {
-              editor;
-              this.closeEditor = editor;
-            }
-          });
-        },
-        200,
-        document
-      );
-    });
   }
 
   show(): void {
-    this.previewEditors = [];
-    this.closeEditor = undefined;
+    const editor = vscode.window.activeTextEditor;
+    this.originalUri = editor ? editor.document.uri : undefined;
     this.quickPick.show();
-    this.find(this.quickPick.value);
   }
 
   find(query: string): void {
     this.quickPick.busy = true;
-    this.findAnythingHandler.find(query).then(items => {
+    const file = this.activeItem ? this.activeItem.uri : undefined;
+    this.findAnythingHandler.find(query, file).then(items => {
       this.quickPick.items = items ? items : [];
-      this.preview(items);
-      this.quickPick.busy = false;
+      this.previewSelected(items).then(isSelected => {
+        this.quickPick.busy = false;
+      });
     });
   }
 
-  preview(values: QuickPickAnything[] | undefined) {
-    if (!values || !values.length || !values[0]) {
+  selectSymbolDefinition(
+    editor: vscode.TextEditor | undefined,
+    range: vscode.Range | undefined,
+    symbol: string | undefined
+  ): void {
+    if (!editor || !symbol || !range) {
       return;
     }
-    this.quickPick.busy = true;
-    const value = values[0];
-    setTimeout(
-      value => {
-        if (this.quickPick.activeItems && this.quickPick.activeItems[0] === value && value.uri) {
-          let options: vscode.TextDocumentShowOptions = {
-            preserveFocus: true
-          };
-          if (value.range) {
-            options.selection = value.range;
-          }
-          vscode.window.showTextDocument(value.uri, options).then((editor: vscode.TextEditor) => {
-            this.previewEditors.push(editor);
-            if (editor && value.symbol && value.range) {
-              this.selectSymbolDefinition(editor, value.range, value.symbol);
-            }
-            this.quickPick.busy = false;
-          });
-        }
-        const lineIndex = this.quickPick.value.indexOf(LINE_PREFIX);
-        if (lineIndex >= 0) {
-          this.previewLine(this.quickPick.value.substr(lineIndex + 1));
-        }
-      },
-      250,
-      value
-    );
-  }
-
-  selectSymbolDefinition(editor: vscode.TextEditor, range: vscode.Range, symbol: string): void {
+    let start = range.start;
+    let end = range.end;
     const textLine = editor.document.lineAt(range.start.line).text;
-    console.log(textLine);
     const symbolStart = textLine.indexOf(symbol);
     if (symbolStart >= 0) {
-      const start = new vscode.Position(range.start.line, symbolStart);
-      const end = new vscode.Position(range.start.line, symbolStart + symbol.length);
-      editor.selection = new vscode.Selection(start, end);
-      editor.revealRange(new vscode.Range(start, end), 1);
+      start = new vscode.Position(range.start.line, symbolStart);
+      end = new vscode.Position(range.start.line, symbolStart + symbol.length);
     }
+    editor.selection = new vscode.Selection(start, end);
+    editor.revealRange(new vscode.Range(start, end), 1);
   }
 
-  previewLine(line: string): void {
+  previewLine(): void {
     const editor = vscode.window.activeTextEditor;
     if (!editor) {
       return;
     }
-
-    const positions = line.split(":");
-    let thisLine = 0;
-    let thisColumn = 0;
-    if (positions.length && !isNaN(+positions[0])) {
-      thisLine = +positions[0] - 1;
+    const lineIndex = this.quickPick.value.indexOf(LINE_PREFIX);
+    if (lineIndex < 0) {
+      return;
     }
-    if (positions.length > 1 && !isNaN(+positions[1])) {
-      thisColumn = +positions[1] - 1;
+    const lineInfo = this.quickPick.value.substr(lineIndex + 1);
+    const position = lineInfo.split(":");
+    let line = 0;
+    let character = 0;
+    if (position.length && !isNaN(+position[0])) {
+      line = +position[0] - 1;
     }
-    const start = new vscode.Position(thisLine, thisColumn);
-    const end = new vscode.Position(thisLine, thisColumn);
+    if (position.length > 1 && !isNaN(+position[1])) {
+      character = +position[1] - 1;
+    }
+    const start = new vscode.Position(line, character);
+    const end = new vscode.Position(line, character);
     editor.selection = new vscode.Selection(start, end);
     editor.revealRange(new vscode.Range(start, end), 1);
   }
@@ -227,41 +185,82 @@ export class GoToAnytingHandler {
     return undefined;
   }
 
+  previewSelected(values: QuickPickAnything[] | undefined): Thenable<boolean> {
+    if (!values || !values.length || !values[0] || !this.enablePreview) {
+      return Promise.resolve(false);
+    }
+    const value = values[0];
+    return new Promise(resolve =>
+      setTimeout(
+        (value, resolve) => {
+          if (this.quickPick.activeItems && this.quickPick.activeItems[0] === value && value.uri) {
+            let options: vscode.TextDocumentShowOptions = {
+              preserveFocus: true,
+              preview: true
+            };
+            return this.showSelected(value, options).then(isOpen => {
+              resolve(isOpen);
+            });
+          }
+          this.previewLine();
+          resolve(false);
+        },
+        this.previewDelay,
+        value,
+        resolve
+      )
+    );
+  }
+
   openSelected(): Thenable<boolean> {
     const items = this.quickPick.selectedItems;
-    if (!items || !items.length || !items[0]) {
+    const item = items && items.length && items[0] ? items[0] : this.activeItem;
+    if (!item) {
       return Promise.resolve(true);
     }
-    if (items[0].shortcut) {
-      this.quickPick.value = items[0].shortcut;
+    if (item.shortcut) {
+      this.quickPick.value = item.shortcut;
       this.find(this.quickPick.value);
       return Promise.resolve(false);
     }
-    if (!items[0].uri) {
-      return Promise.resolve(true);
+    this.originalUri = undefined;
+    return this.showSelected(item, { preview: false });
+  }
+
+  showSelected(item: QuickPickAnything, options: vscode.TextDocumentShowOptions): Thenable<boolean> {
+    if (!item.uri) {
+      this.previewLine();
+      return Promise.resolve(false);
     }
-    return vscode.window
-      .showTextDocument(items[0].uri, {
-        preview: false,
-        selection: items[0].range
-      })
-      .then(editor => {
-        if (this.closeEditor && this.closeEditor.document.uri.path != editor.document.uri.path) {
-          this.closeEditor = undefined;
-        }
-        return Promise.resolve(true);
-      });
+    return vscode.window.showTextDocument(item.uri, options).then(editor => {
+      this.selectSymbolDefinition(editor, item.range, item.symbol);
+      this.previewLine();
+      return true;
+    });
   }
 }
 
 export class FindAnythingHandler {
-  private settings: GoToAnythingSettings;
+  private workspaceFolder: string;
+  private excludePattern: string;
   private symbolSearchTypes: SymbolSearchType[];
-  private files: QuickPickAnything[] = [];
+  private items: QuickPickAnything[] = [];
 
   constructor() {
-    this.settings = this.getSettings();
-    this.findFiles().then(files => (this.files = files));
+    const workspace = vscode.workspace.workspaceFolders![0];
+    this.workspaceFolder = workspace ? workspace.uri.path : "";
+
+    const config = vscode.workspace.getConfiguration("", workspace.uri);
+    let excludePatterns: string[] = [];
+    Object.keys(config.get<Object>("files.exclude", {})).map(pattern => excludePatterns.push(pattern));
+    Object.keys(config.get<Object>("search.exclude", {})).map(pattern => excludePatterns.push(pattern));
+    this.excludePattern = excludePatterns.length ? "{" + excludePatterns.join(",") + "}" : "";
+
+    this.findFiles().then(files => {
+      this.items = files.map(file => {
+        return this.processFile(file);
+      });
+    });
     this.symbolSearchTypes = [
       {
         name: "Functions",
@@ -294,17 +293,7 @@ export class FindAnythingHandler {
     ];
   }
 
-  getSettings(): GoToAnythingSettings {
-    const config = vscode.workspace.getConfiguration("GoToAnything");
-    const workspace = vscode.workspace.workspaceFolders![0];
-    return {
-      workspaceFolder: workspace ? workspace.uri.path : "",
-      maxFileResults: config.get<number>("maxFileResults", MAX_FILE_RESULTS),
-      excludePattern: config.get<string>("excludePattern", EXCLUDE_PATTERN)
-    };
-  }
-
-  find(query: string): Thenable<QuickPickAnything[] | undefined> {
+  find(query: string, file: vscode.Uri | undefined): Thenable<QuickPickAnything[] | undefined> {
     // Empty
     if (!query || !query.length) {
       return Promise.resolve([]);
@@ -314,6 +303,9 @@ export class FindAnythingHandler {
       return Promise.resolve(this.help());
     }
     const editor = vscode.window.activeTextEditor;
+    if (!file && editor) {
+      file = editor.document.uri;
+    }
     // Symbols
     for (let symbolSearchType of this.symbolSearchTypes) {
       const symbolIndex = query.indexOf(symbolSearchType.prefix);
@@ -321,56 +313,57 @@ export class FindAnythingHandler {
         continue;
       }
       query = query.substring(0, symbolIndex);
-      if (!editor) {
+      if (!file) {
         return Promise.resolve([]);
       }
-      const file = editor.document.uri;
-      return this.findSymbols(file).then(symbols => this.processSymbols(symbols, symbolSearchType, query));
+      return this.findSymbols(file).then(symbols =>
+        this.reduceSymbols(symbols, symbolSearchType).map(symbol =>
+          this.processSymbol(symbol, query + symbolSearchType.prefix)
+        )
+      );
     }
     // Files
     if (!query.length) {
-      return Promise.resolve(editor ? [this.processFile(editor.document.uri)] : []);
+      return Promise.resolve(file ? [this.processFile(file)] : []);
     } else {
-      return Promise.resolve(this.files);
+      return Promise.resolve(this.items);
     }
   }
 
-  processSymbols(
-    symbols: vscode.DocumentSymbol[] | undefined,
-    kind: SymbolSearchType,
-    query: string
-  ): QuickPickAnything[] {
-    let items: QuickPickAnything[] = [];
+  reduceSymbols(symbols: vscode.DocumentSymbol[] | undefined, kind: SymbolSearchType): vscode.DocumentSymbol[] {
+    let reduced: vscode.DocumentSymbol[] = [];
     if (symbols == undefined) {
-      return items;
+      return reduced;
     }
     symbols.forEach((symbol: vscode.DocumentSymbol) => {
-      const information = (symbol as unknown) as vscode.SymbolInformation;
-      const file = information.location.uri;
       if (kind.symbolKinds.includes(symbol.kind) && (!kind.ignore || symbol.name.indexOf(kind.ignore) < 0)) {
-        const icon = quickPickIcons[symbol.kind];
-        const detail = vscode.SymbolKind[symbol.kind] + " in " + file.path.replace(this.settings.workspaceFolder, "");
-        const label = icon + " " + symbol.name;
-        const range = symbol.range;
-        const description = query + kind.prefix + symbol.name;
-        items.push({
-          uri: file,
-          symbol: symbol.name,
-          label: label,
-          detail: detail,
-          range: range,
-          description: description
-        });
+        reduced.push(symbol);
       }
-      items = items.concat(this.processSymbols(symbol.children, kind, query));
+      reduced = reduced.concat(this.reduceSymbols(symbol.children, kind));
     });
-    return items;
+    return reduced;
   }
 
-  findFiles(): Thenable<QuickPickAnything[]> {
-    return vscode.workspace
-      .findFiles("**/", this.settings.excludePattern)
-      .then(files => files.map(file => this.processFile(file)));
+  processSymbol(symbol: vscode.DocumentSymbol, query: string): QuickPickAnything {
+    const information = (symbol as unknown) as vscode.SymbolInformation;
+    const file = information.location.uri;
+    const parrent = information.containerName.length ? information.containerName + " in " : "";
+    const icon = quickPickIcons[symbol.kind];
+    const detail = vscode.SymbolKind[symbol.kind] + parrent + " in " + file.path.replace(this.workspaceFolder, "");
+    const label = icon + " " + symbol.name;
+    const description = query + symbol.name;
+    return {
+      uri: file,
+      symbol: symbol.name,
+      label: label,
+      detail: detail,
+      range: symbol.range,
+      description: description
+    };
+  }
+
+  findFiles(): Thenable<vscode.Uri[]> {
+    return vscode.workspace.findFiles("**/", this.excludePattern);
   }
 
   findSymbols(file: vscode.Uri): Thenable<vscode.DocumentSymbol[] | undefined> {
@@ -383,18 +376,11 @@ export class FindAnythingHandler {
   }
 
   processFile(file: vscode.Uri): QuickPickAnything {
-    const anythingItem: QuickPickAnything = {
+    return {
       uri: file,
       label: "$(code) " + file.path.split("/").pop(),
-      detail: file.path.replace(this.settings.workspaceFolder, "")
-      // description: file.scheme
+      detail: file.path.replace(this.workspaceFolder, "")
     };
-    // if (line) {
-    //   anythingItem.description += " " + query + LINE_PREFIX + line;
-    //   anythingItem.line = +line;
-    // }
-
-    return anythingItem;
   }
 
   help(): QuickPickAnything[] {
@@ -416,7 +402,7 @@ export class FindAnythingHandler {
 
 export function activate(context: vscode.ExtensionContext) {
   let disposable = vscode.commands.registerCommand("extension.GoToAnything", () => {
-    GoToAnytingHandler.getInstance().show();
+    new GoToAnytingHandler().show();
   });
 
   context.subscriptions.push(disposable);
