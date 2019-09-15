@@ -180,7 +180,7 @@ export default class FindAnything {
   }
 
   private getExcludePattern(workspaceUri: vscode.Uri): string {
-    const config = vscode.workspace.getConfiguration("", workspace.uri);
+    const config = vscode.workspace.getConfiguration("", workspaceUri);
     let excludePatterns: string[] = [];
     Object.keys(config.get<Object>("files.exclude", {})).map(pattern => excludePatterns.push(pattern));
     Object.keys(config.get<Object>("search.exclude", {})).map(pattern => excludePatterns.push(pattern));
