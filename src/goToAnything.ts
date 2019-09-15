@@ -27,7 +27,7 @@ export default class GoToAnyting {
     this.quickPick.busy = true;
     const file = this.activeItem ? this.activeItem.uri : this.getCurrentUri();
     return this.findAnything.find(query, file).then(items => {
-      this.quickPick.items = items ? items : [];
+      this.quickPick.items = items;
       return this.previewItem(items).then(isSelected => {
         this.quickPick.busy = false;
         return items ? true : false;
@@ -110,8 +110,9 @@ export default class GoToAnyting {
       return Promise.resolve(true);
     }
     if (item.shortcut) {
+      this.activeItem = undefined;
       this.quickPick.value = item.shortcut;
-      this.find(this.quickPick.value).then(() => Promise.resolve(false));
+      return this.find(item.shortcut).then(() => Promise.resolve(false));
     }
     return this.showItem(item, { preview: false });
   }
