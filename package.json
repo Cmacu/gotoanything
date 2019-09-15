@@ -1,14 +1,43 @@
 {
   "name": "gotoanything",
   "displayName": "Go To Anything",
-  "description": "Go To search box similar to Sublime 3 enabling searching for functions and declarations in filtered files via prefixes",
+  "description": "Visual Studio Code plugin that displays a Quick Pick input with capabilities similar to Sublime Text 3 Go To Anything functions",
+  "keywords": [
+    "Go To Anything",
+    "Quick Pick Anything",
+    "Find functions in file",
+    "Sublime Text 3",
+    "Find Symbols in file"
+  ],
+  "homepage": "https://github.com/Cmacu/gotoanything",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Cmacu/gotoanything"
+  },
+  "bugs": {
+    "url": "https://github.com/Cmacu/gotoanything/issues",
+    "email": "cmacu.mail@gmail.com"
+  },
+  "galleryBanner": {
+    "color": "#DD7104",
+    "theme": "dark"
+  },
+  "icon": "img/icon.png",
   "version": "0.0.1",
   "engines": {
     "vscode": "^1.38.0"
   },
   "categories": [
-    "Other"
+    "Other",
+    "Keymaps"
   ],
+  "publisher": "Cmacu",
+  "license": "SEE LICENSE IN /LICENSE",
+  "author": {
+    "name": "Stasi Vladimirov",
+    "email": "cmacu.mail@gmail.com",
+    "url": "https://github.com/Cmacu"
+  },
   "activationEvents": [
     "onCommand:extension.GoToAnything"
   ],
@@ -44,7 +73,7 @@
         "GoToAnything.previewDelay": {
           "type": "integer",
           "default": 250,
-          "description": "The delay in milisecconds for showing preview of the selected item in the dropdown (only if preview is enabled)"
+          "description": "The delay in miliseconds for displaying the selected dropdown item (only if preview is enabled)"
         }
       }
     }
