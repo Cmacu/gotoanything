@@ -4,10 +4,10 @@ import FindAnything, { QuickPickAnything, HELP_PREFIX, LINE_PREFIX } from "./fin
 export default class GoToAnyting {
   private enablePreview: boolean;
   private previewDelay: number;
-  private originalUri: vscode.Uri | undefined;
-  private activeItem: QuickPickAnything | undefined;
   private findAnything: FindAnything;
   private quickPick: vscode.QuickPick<QuickPickAnything>;
+  private originalUri: vscode.Uri | undefined;
+  private activeItem: QuickPickAnything | undefined;
 
   public constructor() {
     const config = vscode.workspace.getConfiguration();
@@ -19,20 +19,19 @@ export default class GoToAnyting {
   }
 
   public show(): void {
-    const editor = vscode.window.activeTextEditor;
-    this.originalUri = editor ? editor.document.uri : undefined;
+    this.originalUri = this.getCurrentUri();
     this.quickPick.show();
   }
 
   public find(query: string): Thenable<boolean> {
     this.quickPick.busy = true;
-    const file = this.activeItem ? this.activeItem.uri : undefined;
+    const file = this.activeItem ? this.activeItem.uri : this.getCurrentUri();
     return this.findAnything.find(query, file).then(items => {
       this.quickPick.items = items ? items : [];
-      this.previewSelected(items).then(isSelected => {
+      return this.previewItem(items).then(isSelected => {
         this.quickPick.busy = false;
+        return items ? true : false;
       });
-      return items ? true : false;
     });
   }
 
@@ -55,7 +54,7 @@ export default class GoToAnyting {
       if (value[0]) {
         this.activeItem = value[0];
       }
-      this.previewSelected(value).then(isSelected => {
+      this.previewItem(value).then(isSelected => {
         this.quickPick.busy = false;
       });
     });
@@ -69,11 +68,63 @@ export default class GoToAnyting {
     });
 
     this.quickPick.onDidAccept(e => {
-      this.openSelected().then(isOpened => {
+      this.openItem().then(isOpened => {
         if (isOpened) {
           this.quickPick.hide();
         }
       });
+    });
+  }
+
+  private previewItem(items: QuickPickAnything[] | undefined): Thenable<boolean> {
+    if (!items || !items.length || !items[0] || !this.enablePreview) {
+      return Promise.resolve(false);
+    }
+    const item = items[0];
+    return new Promise(resolve =>
+      setTimeout(
+        (item, resolve) => {
+          if (this.quickPick.activeItems && this.quickPick.activeItems[0] === item && item.uri) {
+            return this.showItem(item, {
+              preserveFocus: true,
+              preview: true
+            }).then(isOpen => {
+              resolve(isOpen);
+            });
+          }
+          this.previewLine();
+          return resolve(false);
+        },
+        this.previewDelay,
+        item,
+        resolve
+      )
+    );
+  }
+
+  private openItem(): Thenable<boolean> {
+    this.originalUri = undefined;
+    const items = this.quickPick.selectedItems;
+    const item = items && items.length && items[0] ? items[0] : this.activeItem;
+    if (!item) {
+      return Promise.resolve(true);
+    }
+    if (item.shortcut) {
+      this.quickPick.value = item.shortcut;
+      this.find(this.quickPick.value).then(() => Promise.resolve(false));
+    }
+    return this.showItem(item, { preview: false });
+  }
+
+  private showItem(item: QuickPickAnything, options: vscode.TextDocumentShowOptions): Thenable<boolean> {
+    if (!item.uri) {
+      this.previewLine();
+      return Promise.resolve(false);
+    }
+    return vscode.window.showTextDocument(item.uri, options).then(editor => {
+      this.selectSymbolDefinition(editor, item.range, item.symbol);
+      this.previewLine();
+      return true;
     });
   }
 
@@ -98,12 +149,12 @@ export default class GoToAnyting {
   }
 
   private previewLine(): void {
-    const editor = vscode.window.activeTextEditor;
-    if (!editor) {
-      return;
-    }
     const lineIndex = this.quickPick.value.indexOf(LINE_PREFIX);
     if (lineIndex < 0) {
+      return;
+    }
+    const editor = vscode.window.activeTextEditor;
+    if (!editor) {
       return;
     }
     const lineInfo = this.quickPick.value.substr(lineIndex + 1);
@@ -122,56 +173,8 @@ export default class GoToAnyting {
     editor.revealRange(new vscode.Range(start, end), 1);
   }
 
-  private previewSelected(items: QuickPickAnything[] | undefined): Thenable<boolean> {
-    if (!items || !items.length || !items[0] || !this.enablePreview) {
-      return Promise.resolve(false);
-    }
-    const item = items[0];
-    return new Promise(resolve =>
-      setTimeout(
-        (item, resolve) => {
-          if (this.quickPick.activeItems && this.quickPick.activeItems[0] === item && item.uri) {
-            let options: vscode.TextDocumentShowOptions = {
-              preserveFocus: true,
-              preview: true
-            };
-            return this.showSelected(item, options).then(isOpen => {
-              resolve(isOpen);
-            });
-          }
-          this.previewLine();
-          resolve(false);
-        },
-        this.previewDelay,
-        item,
-        resolve
-      )
-    );
-  }
-
-  private openSelected(): Thenable<boolean> {
-    this.originalUri = undefined;
-    const items = this.quickPick.selectedItems;
-    const item = items && items.length && items[0] ? items[0] : this.activeItem;
-    if (!item) {
-      return Promise.resolve(true);
-    }
-    if (item.shortcut) {
-      this.quickPick.value = item.shortcut;
-      this.find(this.quickPick.value).then(() => Promise.resolve(false));
-    }
-    return this.showSelected(item, { preview: false });
-  }
-
-  private showSelected(item: QuickPickAnything, options: vscode.TextDocumentShowOptions): Thenable<boolean> {
-    if (!item.uri) {
-      this.previewLine();
-      return Promise.resolve(false);
-    }
-    return vscode.window.showTextDocument(item.uri, options).then(editor => {
-      this.selectSymbolDefinition(editor, item.range, item.symbol);
-      this.previewLine();
-      return true;
-    });
+  private getCurrentUri(): vscode.Uri | undefined {
+    const editor = vscode.window.activeTextEditor;
+    return editor ? editor.document.uri : undefined;
   }
 }

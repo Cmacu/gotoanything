@@ -2,6 +2,7 @@ import * as vscode from "vscode";
 
 export const HELP_PREFIX = "?";
 export const LINE_PREFIX = ":";
+
 const FUNCTION_PREFIX = "@";
 const DECLARATION_PREFIX = "$";
 const LITERAL_PREFIX = "!";
@@ -48,7 +49,7 @@ export interface QuickPickAnything extends vscode.QuickPickItem {
   line?: number;
 }
 
-export interface SymbolSearchType {
+interface SymbolSearchType {
   name: string;
   prefix: string;
   label: string;
@@ -59,21 +60,13 @@ export interface SymbolSearchType {
 
 export default class FindAnything {
   private workspaceFolder: string;
-  private excludePattern: string;
-  private symbolSearchTypes: SymbolSearchType[];
   private items: QuickPickAnything[] = [];
+  private symbolSearchTypes: SymbolSearchType[];
 
   public constructor() {
     const workspace = vscode.workspace.workspaceFolders![0];
     this.workspaceFolder = workspace ? workspace.uri.path : "";
-
-    const config = vscode.workspace.getConfiguration("", workspace.uri);
-    let excludePatterns: string[] = [];
-    Object.keys(config.get<Object>("files.exclude", {})).map(pattern => excludePatterns.push(pattern));
-    Object.keys(config.get<Object>("search.exclude", {})).map(pattern => excludePatterns.push(pattern));
-    this.excludePattern = excludePatterns.length ? "{" + excludePatterns.join(",") + "}" : "";
-
-    this.findFiles().then(files => {
+    this.findFiles(this.getExcludePattern(workspace.uri)).then(files => {
       this.items = files.map(file => {
         return this.processFile(file);
       });
@@ -81,7 +74,7 @@ export default class FindAnything {
     this.symbolSearchTypes = this.getSearchTypes();
   }
 
-  public find(query: string, file: vscode.Uri | undefined): Thenable<QuickPickAnything[] | undefined> {
+  public find(query: string, file: vscode.Uri | undefined): Thenable<QuickPickAnything[]> {
     // Empty
     if (!query || !query.length) {
       return Promise.resolve([]);
@@ -89,11 +82,6 @@ export default class FindAnything {
     // Help
     if (query.indexOf(HELP_PREFIX) >= 0) {
       return Promise.resolve(this.help());
-    }
-
-    const editor = vscode.window.activeTextEditor;
-    if (!file && editor) {
-      file = editor.document.uri;
     }
     // Symbols
     for (let symbolSearchType of this.symbolSearchTypes) {
@@ -107,10 +95,10 @@ export default class FindAnything {
         }
         vscode.commands.executeCommand(symbolSearchType.command);
       }
-      query = query.substring(0, symbolIndex);
       if (!file) {
         return Promise.resolve([]);
       }
+      query = query.substring(0, symbolIndex);
       return this.findSymbols(file).then(symbols =>
         this.reduceSymbols(symbols, symbolSearchType).map(symbol =>
           this.processSymbol(symbol, query + symbolSearchType.prefix)
@@ -118,11 +106,7 @@ export default class FindAnything {
       );
     }
     // Files
-    if (!query.length) {
-      return Promise.resolve(file ? [this.processFile(file)] : []);
-    } else {
-      return Promise.resolve(this.items);
-    }
+    return Promise.resolve(query.length ? this.items : file ? [this.processFile(file)] : []);
   }
 
   private reduceSymbols(symbols: vscode.DocumentSymbol[] | undefined, kind: SymbolSearchType): vscode.DocumentSymbol[] {
@@ -161,8 +145,8 @@ export default class FindAnything {
     };
   }
 
-  private findFiles(): Thenable<vscode.Uri[]> {
-    return vscode.workspace.findFiles("**/", this.excludePattern);
+  private findFiles(excludePattern: string): Thenable<vscode.Uri[]> {
+    return vscode.workspace.findFiles("**/", excludePattern);
   }
 
   private findSymbols(file: vscode.Uri): Thenable<vscode.DocumentSymbol[] | undefined> {
@@ -193,6 +177,14 @@ export default class FindAnything {
     });
 
     return items;
+  }
+
+  private getExcludePattern(workspaceUri: vscode.Uri): string {
+    const config = vscode.workspace.getConfiguration("", workspace.uri);
+    let excludePatterns: string[] = [];
+    Object.keys(config.get<Object>("files.exclude", {})).map(pattern => excludePatterns.push(pattern));
+    Object.keys(config.get<Object>("search.exclude", {})).map(pattern => excludePatterns.push(pattern));
+    return excludePatterns.length ? "{" + excludePatterns.join(",") + "}" : "";
   }
 
   private getSearchTypes(): SymbolSearchType[] {
