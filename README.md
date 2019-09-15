@@ -63,7 +63,6 @@ The default shortcut is `Cmd+P` for Mac (`Ctrl+P` for Windows). To change it sea
 
 ```json
 {
-  ...
   "extension.GoToAnything": "keyboard shortcut"
 }
 ```
