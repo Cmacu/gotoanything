@@ -149,7 +149,7 @@ export default class GoToAnyting {
     quickPick.matchOnDescription = true;
     quickPick.onDidChangeValue(value => this.onDidChangeValue(value, quickPick));
     quickPick.onDidChangeActive(items => this.onDidChangeActive(items, quickPick));
-    quickPick.onDidHide(this.onDidHide);
+    quickPick.onDidHide(e => this.onDidHide());
     quickPick.onDidAccept(e => this.onDidAccept(e, quickPick));
     quickPick.show();
   }

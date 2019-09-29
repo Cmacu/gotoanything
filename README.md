@@ -81,6 +81,10 @@ Pasting in the search box may not behave as expected since the extension rellies
 
 ## Release Notes
 
+### 0.2.1
+
+Return to original editor on cancel fix
+
 ### 0.2.0
 
 Various bug fixes and speed improvements
