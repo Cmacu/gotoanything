@@ -233,7 +233,6 @@ export default class GoToAnyting {
     item.label += this.searchTypes.Line.prefix + search.symbolQuery;
     item.description += ' ' + search.fileQuery + this.searchTypes.Line.prefix + search.symbolQuery;
     item.range = new vscode.Range(start, end);
-    console.log(item);
     return [item];
   }
 
