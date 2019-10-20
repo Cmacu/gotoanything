@@ -70,6 +70,53 @@
     "configuration": {
       "title": "GoToAnything",
       "properties": {
+        "GoToAnything.prefix.Functions": {
+          "type": "string",
+          "default": "@",
+          "description": "Prefix to invoke search by function name. Empty string to disable. The default is @"
+        },
+        "GoToAnything.prefix.Declarations": {
+          "type": "string",
+          "default": "$",
+          "description": "Prefix to invoke search for declarations. Empty string to disable. The default is $"
+        },
+        "GoToAnything.prefix.Commands": {
+          "type": "string",
+          "default": ">",
+          "description": "Prefix to invoke a command search (active only on first char). Empty string to disable. The default is >"
+        },
+        "GoToAnything.prefix.Symbols": {
+          "type": "string",
+          "default": "#",
+          "description": "Prefix to invoke search for all symbols in workspace (active only on first char). Empty string to disable. The default is #"
+        },
+        "GoToAnything.prefix.Recent": {
+          "type": "string",
+          "default": "*",
+          "description": "Prefix to invoke the vscode go to file search (active only on first char, no functions or declarations search). Empty string to disable. The default is *"
+        },
+        "GoToAnything.symbols.Functions": {
+          "type": "array",
+          "default": [
+            5,
+            8,
+            11
+          ],
+          "description": "List of symbol types to include in the Functions search. For options visit: https://github.com/Cmacu/gotoanything/blob/master/src/symbolIcons.ts"
+        },
+        "GoToAnything.symbols.Declarations": {
+          "type": "array",
+          "default": [
+            4,
+            6,
+            7,
+            9,
+            10,
+            12,
+            13
+          ],
+          "description": "List of symbol types to include in the Declarations search. For options visit: https://github.com/Cmacu/gotoanything/blob/master/src/symbolIcons.ts"
+        },
         "GoToAnything.previewDelay": {
           "type": "integer",
           "default": 250,

@@ -1,43 +1,5 @@
 import * as vscode from 'vscode';
-import { isNumber } from 'util';
-
-const HELP_PREFIX = '?';
-const LINE_PREFIX = ':';
-const FUNCTION_PREFIX = '@';
-const DECLARATION_PREFIX = '$';
-const COMMAND_PREFIX = '>';
-const SYMBOL_PREFIX = '#';
-const RECENT_PREFIX = '_';
-const quickPickIcons = {
-  0: '$(code)', // "File",
-  1: '$(book)', // "Module",
-  2: '$(three-bars)', // "Namespace",
-  3: '$(package)', // "Package",
-  4: '$(verified)', // "Class",
-  5: '$(pulse)', // "Method",
-  6: '$(plus)', // "Property",
-  7: '$(pin)', // "Field",
-  8: '$(plug)', // "Constructor",
-  9: '$(organization-filled)', // "Enum",
-  10: '$(lock)', // "Interface",
-  11: '$(mention)', // "Function",
-  12: '$(primitive-dot)', // "Variable",
-  13: '$(primitive-square)', // "Constant",
-  14: '$(quote)', // "String",
-  15: '$(list-ordered)', // "Number",
-  16: '$(law)', // "Boolean",
-  17: '$(kebab-horizontal)', // "Array",
-  18: '$(kebab-vertica)', // "Object",
-  19: '$(key)', // "Key",
-  20: '$(x)', // "Null",
-  21: '$(person-filled)', // "EnumMember",
-  22: '$(kebab-vertical)', // "Struct",
-  23: '$(watch)', // "Event",
-  24: '$(terminal)', // "Operator",
-  25: '$(zap)', // "TypeParameter"
-};
-const FUNCTION_SYMBOL_KINDS = [5, 8, 11];
-const DECLARATION_SYMBOL_KINDS = [4, 6, 7, 9, 10, 12, 13];
+import quickPickIcons from './symbolIcons';
 
 interface QuickPickAnything extends vscode.QuickPickItem {
   uri?: vscode.Uri;
@@ -46,17 +8,18 @@ interface QuickPickAnything extends vscode.QuickPickItem {
   range?: vscode.Range;
 }
 interface SymbolSearchType {
-  name: string;
-  prefix: string;
+  prefix?: string;
   label: string;
   callFunction: (search: SearchItem) => Promise<QuickPickAnything[]>;
   forceSearch?: boolean;
   symbolKinds?: number[];
+  detectOnlyOnFirstChar?: boolean;
   ignore?: string;
   command?: string;
 }
 
 interface SearchItem {
+  name: string;
   type: SymbolSearchType;
   fileQuery: string;
   symbolQuery: string;
@@ -66,6 +29,7 @@ interface SearchItem {
 interface SearchResult {
   success: boolean;
   items: QuickPickAnything[];
+  retry?: boolean;
 }
 
 export default class GoToAnyting {
@@ -77,58 +41,7 @@ export default class GoToAnyting {
   private enablePreview: boolean;
   private previewDelay: number;
   private files: QuickPickAnything[] = [];
-  // private items: QuickPickAnything[] = [];
-  private searchTypes: SymbolSearchType[] = [
-    {
-      name: 'Functions',
-      prefix: FUNCTION_PREFIX,
-      symbolKinds: FUNCTION_SYMBOL_KINDS,
-      label: "Type '" + FUNCTION_PREFIX + "' to search for functions/methods within the selected file",
-      ignore: ' callback',
-      callFunction: this.findSymbols,
-    },
-    {
-      name: 'Declarations',
-      prefix: DECLARATION_PREFIX,
-      symbolKinds: DECLARATION_SYMBOL_KINDS,
-      label: "Type '" + DECLARATION_PREFIX + "' to search for declarations within the selected file",
-      callFunction: this.findSymbols,
-    },
-    {
-      name: 'Line',
-      prefix: LINE_PREFIX,
-      label: "Type '" + LINE_PREFIX + "' to go to line within the selected file",
-      forceSearch: true,
-      callFunction: this.addLine,
-    },
-    {
-      name: 'Commands',
-      prefix: COMMAND_PREFIX,
-      command: 'workbench.action.showCommands',
-      label: "Type '" + COMMAND_PREFIX + "' to open the default Go To Command menu",
-      callFunction: this.runCommand,
-    },
-    {
-      name: 'Symbols',
-      prefix: SYMBOL_PREFIX,
-      command: 'workbench.action.showAllSymbols',
-      label: "Type '" + SYMBOL_PREFIX + "' to open the default Go To Symbol in Workspace",
-      callFunction: this.runCommand,
-    },
-    {
-      name: 'Recent',
-      prefix: RECENT_PREFIX,
-      command: 'workbench.action.quickOpen',
-      label: "Type '" + RECENT_PREFIX + "' to show recent files",
-      callFunction: this.runCommand,
-    },
-    {
-      name: 'Help',
-      prefix: HELP_PREFIX,
-      label: "Type '" + HELP_PREFIX + "' to show available prefix options",
-      callFunction: this.getHelp,
-    },
-  ];
+  private searchTypes: { [name: string]: SymbolSearchType };
 
   public constructor() {
     const workspace = vscode.workspace.workspaceFolders![0];
@@ -137,6 +50,7 @@ export default class GoToAnyting {
       this.files = files.map(file => this.processFile(file));
     });
     const config = vscode.workspace.getConfiguration();
+    this.searchTypes = this.getSearchTypes(config);
     this.enablePreview = config.get('workbench.editor.enablePreview', true);
     this.previewDelay = config.get('GoToAnything.previewDelay', 250);
     this.originalUri = this.getCurrentUri();
@@ -145,7 +59,7 @@ export default class GoToAnyting {
 
   private createQuickPick(): void {
     const quickPick = vscode.window.createQuickPick<QuickPickAnything>();
-    quickPick.placeholder = "Go To Anything. Type '" + HELP_PREFIX + "' for help";
+    quickPick.placeholder = "Go To Anything. Type '" + this.searchTypes.Help.prefix + "' for help";
     quickPick.matchOnDescription = true;
     quickPick.onDidChangeValue(value => this.onDidChangeValue(value, quickPick));
     quickPick.onDidChangeActive(items => this.onDidChangeActive(items, quickPick));
@@ -159,17 +73,17 @@ export default class GoToAnyting {
     setTimeout(
       value => {
         if (quickPick.value == value) {
-          return this.search(value)
+          return this.search(value.trim())
             .then((result: SearchResult) => {
               if (result.success) quickPick.items = result.items;
-              // else quickPick.items.filter(item=>)
+              else if (result.retry) this.onDidChangeValue(value, quickPick);
             })
             .finally(() => (quickPick.busy = false));
         }
         quickPick.busy = false;
       },
       this.previewDelay,
-      value
+      value,
     );
   }
 
@@ -188,7 +102,7 @@ export default class GoToAnyting {
         quickPick.busy = false;
       },
       this.previewDelay,
-      this.currentItem
+      this.currentItem,
     );
   }
 
@@ -217,16 +131,16 @@ export default class GoToAnyting {
 
   public async search(query: string): Promise<SearchResult> {
     const search = this.getSearchItem(query);
-    if (this.currentType == search.type.name && !search.forceSearch) {
+    if (this.currentType == search.name && !search.forceSearch) {
       return { success: false, items: [] };
     }
     return search.type.callFunction
       .call(this, search)
       .then(items => {
-        this.currentType = search.type.name;
+        this.currentType = search.name;
         return { success: true, items: items };
       })
-      .catch(() => ({ success: false, items: [] }));
+      .catch(() => ({ success: false, retry: true, items: [] }));
   }
 
   private showItem(item: QuickPickAnything, options: vscode.TextDocumentShowOptions): Thenable<boolean> {
@@ -242,7 +156,7 @@ export default class GoToAnyting {
   private showRange(
     editor: vscode.TextEditor | undefined,
     range: vscode.Range | undefined,
-    symbol: string | undefined
+    symbol: string | undefined,
   ): void {
     if (!editor || !range) {
       return;
@@ -263,8 +177,8 @@ export default class GoToAnyting {
 
   private getSearchItem(query: string): SearchItem {
     let fileSearch = {
+      name: 'Files',
       type: {
-        name: 'Files',
         callFunction: this.getFiles,
         prefix: '',
         label: 'Files',
@@ -276,10 +190,18 @@ export default class GoToAnyting {
       return fileSearch;
     }
 
-    for (let searchType of this.searchTypes) {
+    for (let searchName in this.searchTypes) {
+      let searchType = this.searchTypes[searchName];
+      if (!searchType.prefix) {
+        continue;
+      }
       const symbolIndex = query.indexOf(searchType.prefix);
       if (!(symbolIndex < 0)) {
+        if (searchType.detectOnlyOnFirstChar && symbolIndex != 0) {
+          continue;
+        }
         return {
+          name: searchName,
           type: searchType,
           fileQuery: query.substring(0, symbolIndex),
           symbolQuery: query.substring(symbolIndex + 1),
@@ -308,8 +230,8 @@ export default class GoToAnyting {
     const start = new vscode.Position(line, character);
     const end = new vscode.Position(line, character);
     let item = this.processFile(file);
-    item.label += LINE_PREFIX + search.symbolQuery;
-    item.description += ' ' + search.fileQuery + LINE_PREFIX + search.symbolQuery;
+    item.label += this.searchTypes.Line.prefix + search.symbolQuery;
+    item.description += ' ' + search.fileQuery + this.searchTypes.Line.prefix + search.symbolQuery;
     item.range = new vscode.Range(start, end);
     console.log(item);
     return [item];
@@ -326,12 +248,12 @@ export default class GoToAnyting {
     } else {
       symbols = await vscode.commands.executeCommand<vscode.DocumentSymbol[]>(
         'vscode.executeDocumentSymbolProvider',
-        file
+        file,
       );
       this.currentSymbols = { file: file, symbols: symbols };
     }
     return this.reduceSymbols(symbols, search.type).map(symbol =>
-      this.processSymbol(symbol, search.fileQuery + search.type.prefix)
+      this.processSymbol(symbol, search.fileQuery + search.type.prefix),
     );
   }
 
@@ -392,13 +314,75 @@ export default class GoToAnyting {
 
   private async getHelp(): Promise<QuickPickAnything[]> {
     let index = 1;
-    let items: QuickPickAnything[] = Object.values(this.searchTypes).map(symbolSearchType => ({
-      shortcut: symbolSearchType.prefix,
-      label: index++ + '?\t' + symbolSearchType.label,
-    }));
-    items.push({ shortcut: '', label: '0?\tType anything in the input box to find files or filter by file path' });
+    let items: QuickPickAnything[] = Object.values(this.searchTypes)
+      .filter(symbolSearchType => symbolSearchType.prefix)
+      .map(symbolSearchType => ({
+        shortcut: symbolSearchType.prefix,
+        label: index++ + `?\tType "${symbolSearchType.prefix}" ${symbolSearchType.label}`,
+      }));
+    items.push({
+      shortcut: '',
+      label: '0?\tType anything in the input box to find files or filter by file path',
+    });
 
     return items;
+  }
+
+  private getSearchTypes(config: vscode.WorkspaceConfiguration): { [name: string]: SymbolSearchType } {
+    let searchTypes: { [name: string]: SymbolSearchType } = {
+      Help: {
+        prefix: '?',
+        label: ' to show available prefix options',
+        detectOnlyOnFirstChar: true,
+        callFunction: this.getHelp,
+      },
+      Commands: {
+        command: 'workbench.action.showCommands',
+        label: ' to open the default Go To Command menu',
+        detectOnlyOnFirstChar: true,
+        callFunction: this.runCommand,
+      },
+      Symbols: {
+        command: 'workbench.action.showAllSymbols',
+        label: ' to open the default Go To Symbol in Workspace',
+        detectOnlyOnFirstChar: true,
+        callFunction: this.runCommand,
+      },
+      Recent: {
+        command: 'workbench.action.quickOpen',
+        label: ' to show recent files',
+        detectOnlyOnFirstChar: true,
+        callFunction: this.runCommand,
+      },
+      Functions: {
+        symbolKinds: config.get('GoToAnything.symbols.Functions', []),
+        label: ' to search for functions/methods within the selected file',
+        ignore: ' callback',
+        callFunction: this.findSymbols,
+      },
+      Declarations: {
+        symbolKinds: config.get('GoToAnything.symbols.Declarations', []),
+        label: ' to search for declarations within the selected file',
+        callFunction: this.findSymbols,
+      },
+      Line: {
+        prefix: ':',
+        label: ' to go to line within the selected file',
+        forceSearch: true,
+        callFunction: this.addLine,
+      },
+    };
+    Object.keys(searchTypes).forEach(searchName => {
+      if (searchTypes[searchName].prefix) return true;
+      let prefix = config.get('GoToAnything.prefix.' + searchName, '');
+      if (prefix) {
+        searchTypes[searchName].prefix = config.get('GoToAnything.prefix.' + searchName);
+      } else {
+        delete searchTypes[searchName];
+      }
+    });
+
+    return searchTypes;
   }
 
   private getExcludePattern(workspaceUri: vscode.Uri): string {

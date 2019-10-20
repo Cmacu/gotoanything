@@ -43,16 +43,6 @@ If you type `$` directly it will load all declarations in the currently opened f
 
 ![gotohelp](/img/goto_help.gif)
 
-<!--
-Describe specific features of your extension including screenshots of your extension in action. Image paths are relative to this README file.
-
-For example if there is an image subfolder under your extension project workspace:
-
-\!\[feature X\]\(images/feature-x.png\)
-
-> Tip: Many popular extensions utilize animations. This is an excellent way to show off your extension! We recommend short, focused animations that are easy to follow.
- -->
-
 ## Requirements
 
 To display symbols properly this extension relies on the existing VSCode symbol detection that depends on the installed Language settings and packages. If symbol is not available as expected check if it's available in the native VSCode Go To Symbol in File.
@@ -72,14 +62,29 @@ to your `keybindings.json` file
 This extension utilizes the following workspace settings:
 
 - `workbench.editor.enablePreview` enables or disables the file preview functionality when changing the selected item
-- `gotoanything.previewDelay`: The delay in miliseconds for displaying the selected dropdown item (only if preview is enabled)
 - `files.exclude` and `search.exclude` are used as exclude patterns for the file search
+
+- `GoToAnything.prefix.Functions` Prefix to invoke search by function name. Empty string to disable. The default is `@`
+- `GoToAnything.prefix.Declarations` Prefix to invoke search for declarations. Empty string to disable. The default is `#`
+- `GoToAnything.prefix.Commands` Prefix to invoke a command search (active only on first char). Empty string to disable. The default is `>`
+- `GoToAnything.prefix.Symbols` Prefix to invoke search for all symbols in workspace (active only on first char). Empty string to disable. The default is `#`
+- `GoToAnything.prefix.Recent` Prefix to invoke the vscode go to file search (active only on first char, no functions or declarations search). Empty string to disable. The default is `*`
+
+- `GoToAnything.symbols.Functions` List of symbol types to include in the Functions search. The efault is: `[5, 8, 11]`. For options visit: https://github.com/Cmacu/gotoanything/blob/master/src/symbolIcons.ts
+- `GoToAnything.symbols.Declarations` List of symbol types to include in the Declarations search. The default is: `[4, 6, 7, 9, 10, 12, 13]`. For options visit: https://github.com/Cmacu/gotoanything/blob/master/src/symbolIcons.ts
+
+- `gotoanything.previewDelay`: The delay in miliseconds for displaying the selected dropdown item (only if preview is enabled)
 
 ## Known Issues
 
 Pasting in the search box may not behave as expected since the extension rellies on selecting the file before filtering for symbols in file
 
 ## Release Notes
+
+### 0.3.0
+
+Bug fixes
+Added prefix and symbol customizations
 
 ### 0.2.1
 
@@ -116,7 +121,7 @@ Initial release
 
 ## Road Map
 
-- [ ] Enable prefix customizations
+- [x] Enable prefix customizations
 - [ ] Add tooltips when no results are found
 
 ## License
