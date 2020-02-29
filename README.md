@@ -63,6 +63,7 @@ This extension utilizes the following workspace settings:
 
 - `workbench.editor.enablePreview` enables or disables the file preview functionality when changing the selected item
 - `files.exclude` and `search.exclude` are used as exclude patterns for the file search
+- `search.useIgnoreFiles` is used to respect and exclude patterns from `.gitignore` and `.ignore`
 
 - `GoToAnything.prefix.Functions` Prefix to invoke search by function name. Empty string to disable. The default is `@`
 - `GoToAnything.prefix.Declarations` Prefix to invoke search for declarations. Empty string to disable. The default is `#`
