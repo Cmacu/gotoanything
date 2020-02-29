@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import quickPickIcons from './symbolIcons';
+import { TextDecoder } from 'util';
 
 interface QuickPickAnything extends vscode.QuickPickItem {
   uri?: vscode.Uri;
@@ -32,6 +33,8 @@ interface SearchResult {
   retry?: boolean;
 }
 
+type IgnoreRecord = Record<string, boolean>;
+
 export default class GoToAnyting {
   private originalUri: vscode.Uri | undefined;
   private currentType: string = '';
@@ -46,9 +49,7 @@ export default class GoToAnyting {
   public constructor() {
     const workspace = vscode.workspace.workspaceFolders![0];
     this.workspaceFolder = workspace ? workspace.uri.path : '';
-    this.loadFiles(this.getExcludePattern(workspace.uri)).then(files => {
-      this.files = files.map(file => this.processFile(file));
-    });
+    this.loadFiles(workspace.uri);
     const config = vscode.workspace.getConfiguration();
     this.searchTypes = this.getSearchTypes(config);
     this.enablePreview = config.get('workbench.editor.enablePreview', true);
@@ -61,17 +62,17 @@ export default class GoToAnyting {
     const quickPick = vscode.window.createQuickPick<QuickPickAnything>();
     quickPick.placeholder = "Go To Anything. Type '" + this.searchTypes.Help.prefix + "' for help";
     quickPick.matchOnDescription = true;
-    quickPick.onDidChangeValue(value => this.onDidChangeValue(value, quickPick));
-    quickPick.onDidChangeActive(items => this.onDidChangeActive(items, quickPick));
-    quickPick.onDidHide(e => this.onDidHide());
-    quickPick.onDidAccept(e => this.onDidAccept(e, quickPick));
+    quickPick.onDidChangeValue((value) => this.onDidChangeValue(value, quickPick));
+    quickPick.onDidChangeActive((items) => this.onDidChangeActive(items, quickPick));
+    quickPick.onDidHide((e) => this.onDidHide());
+    quickPick.onDidAccept((e) => this.onDidAccept(e, quickPick));
     quickPick.show();
   }
 
   private onDidChangeValue(value: string, quickPick: vscode.QuickPick<QuickPickAnything>) {
     quickPick.busy = true;
     setTimeout(
-      value => {
+      (value) => {
         if (quickPick.value == value) {
           return this.search(value.trim())
             .then((result: SearchResult) => {
@@ -92,12 +93,12 @@ export default class GoToAnyting {
     quickPick.busy = true;
     this.currentItem = items[0];
     setTimeout(
-      item => {
+      (item) => {
         if (quickPick.activeItems && quickPick.activeItems[0].uri === item.uri) {
           return this.showItem(item, {
             preserveFocus: true,
             preview: true,
-          }).then(isSelected => (quickPick.busy = false));
+          }).then((isSelected) => (quickPick.busy = false));
         }
         quickPick.busy = false;
       },
@@ -136,7 +137,7 @@ export default class GoToAnyting {
     }
     return search.type.callFunction
       .call(this, search)
-      .then(items => {
+      .then((items) => {
         this.currentType = search.name;
         return { success: true, items: items };
       })
@@ -147,7 +148,7 @@ export default class GoToAnyting {
     if (!item.uri) {
       return Promise.resolve(false);
     }
-    return vscode.window.showTextDocument(item.uri, options).then(editor => {
+    return vscode.window.showTextDocument(item.uri, options).then((editor) => {
       this.showRange(editor, item.range, item.symbol);
       return true;
     });
@@ -251,7 +252,7 @@ export default class GoToAnyting {
       );
       this.currentSymbols = { file: file, symbols: symbols };
     }
-    return this.reduceSymbols(symbols, search.type).map(symbol =>
+    return this.reduceSymbols(symbols, search.type).map((symbol) =>
       this.processSymbol(symbol, search.fileQuery + search.type.prefix),
     );
   }
@@ -307,15 +308,18 @@ export default class GoToAnyting {
     return this.files;
   }
 
-  private loadFiles(excludePattern: string): Thenable<vscode.Uri[]> {
-    return vscode.workspace.findFiles('**/', excludePattern);
+  private async loadFiles(workspaceUri: vscode.Uri): Promise<void> {
+    const excludePattern = await this.getExcludePattern(workspaceUri);
+    console.log(excludePattern);
+    const files = await vscode.workspace.findFiles('**/', excludePattern);
+    this.files = files.map((file) => this.processFile(file));
   }
 
   private async getHelp(): Promise<QuickPickAnything[]> {
     let index = 1;
     let items: QuickPickAnything[] = Object.values(this.searchTypes)
-      .filter(symbolSearchType => symbolSearchType.prefix)
-      .map(symbolSearchType => ({
+      .filter((symbolSearchType) => symbolSearchType.prefix)
+      .map((symbolSearchType) => ({
         shortcut: symbolSearchType.prefix,
         label: index++ + `?\tType "${symbolSearchType.prefix}" ${symbolSearchType.label}`,
       }));
@@ -371,7 +375,7 @@ export default class GoToAnyting {
         callFunction: this.addLine,
       },
     };
-    Object.keys(searchTypes).forEach(searchName => {
+    Object.keys(searchTypes).forEach((searchName) => {
       if (searchTypes[searchName].prefix) return true;
       let prefix = config.get('GoToAnything.prefix.' + searchName, '');
       if (prefix) {
@@ -384,12 +388,36 @@ export default class GoToAnyting {
     return searchTypes;
   }
 
-  private getExcludePattern(workspaceUri: vscode.Uri): string {
+  private async getExcludePattern(workspaceUri: vscode.Uri): Promise<string> {
     const config = vscode.workspace.getConfiguration('', workspaceUri);
-    let excludePatterns: string[] = [];
-    Object.keys(config.get<Object>('files.exclude', {})).map(pattern => excludePatterns.push(pattern));
-    Object.keys(config.get<Object>('search.exclude', {})).map(pattern => excludePatterns.push(pattern));
+    const filesExclude = config.get<IgnoreRecord>('files.exclude', {});
+    const searchExclude = config.get<IgnoreRecord>('search.exclude', {});
+    const useGitIgnore = config.get<Boolean>('search.useIgnoreFiles');
+    const ignore: IgnoreRecord = useGitIgnore ? await this.getIgnore('.ignore') : {};
+    const gitIgnore: IgnoreRecord = useGitIgnore ? await this.getIgnore('.gitignore') : {};
+    const exclude = { ...filesExclude, ...searchExclude, ...gitIgnore, ...ignore };
+    const excludePatterns: string[] = Object.keys(exclude);
+    console.log(exclude, excludePatterns);
     return excludePatterns.length ? '{' + excludePatterns.join(',') + '}' : '';
+  }
+
+  private async getIgnore(filename: string): Promise<IgnoreRecord> {
+    let ignore: IgnoreRecord = {};
+    const ignoreUri: vscode.Uri = vscode.Uri.file(this.workspaceFolder + '/' + filename);
+    try {
+      const ignroreBlob = await vscode.workspace.fs.readFile(ignoreUri);
+      const ignoreString = new TextDecoder('utf-8').decode(ignroreBlob);
+      ignoreString.split('\n').forEach((value: string) => {
+        if (value.includes('#')) return;
+        if (value.startsWith('!')) return;
+        if (value.endsWith('/')) value = value.slice(0, -1);
+        if (value.startsWith('**/')) ignore[value] = true;
+        else ignore[`**/${value}`] = true;
+      });
+    } catch (error) {
+      console.error(error);
+    }
+    return ignore;
   }
 
   private getCurrentUri(): vscode.Uri | undefined {
